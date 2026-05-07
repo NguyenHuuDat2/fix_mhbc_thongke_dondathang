@@ -1,3 +1,105 @@
+ALTER PROCEDURE Z_Q00713_D05P0707
+(
+    @DivisionID             VARCHAR(50),
+    @IsPeriod               TINYINT = 0,
+    @PeriodFrom             VARCHAR(50) = '',
+    @PeriodTo               VARCHAR(50) = '',
+    @IsRDVoucherDate        TINYINT = 0,            -- Cho phép lọc theo ngày phiếu
+    @DateRDVoucherDateFrom  DATETIME = NULL,         -- Ngày hợp đồng từ
+    @DateRDVoucherDateTo    DATETIME = NULL,         -- Ngày hợp đồng đến
+    @Mode                   TINYINT = 0,            -- Chế độ lấy cột (0: lấy cấu trúc cột, 1: lấy dữ liệu)
+    @VoucherNo              VARCHAR(MAX) = '',
+    
+    -- Các điều kiện lọc mới
+    @DeliveryDateFrom       DATETIME = NULL,         -- Ngày giao hàng từ
+    @DeliveryDateTo         DATETIME = NULL,         -- Ngày giao hàng đến
+    @StatusSO               VARCHAR(50) = '%'       -- Trạng thái đơn hàng
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @FromMonth TINYINT, @FromYear INT, @ToMonth TINYINT, @ToYear INT;
+    
+    -- Chuyển đổi PeriodFrom và PeriodTo thành tháng/năm
+    SET @FromMonth = LEFT(@PeriodFrom, 2);
+    SET @FromYear  = RIGHT(@PeriodFrom, 4);
+    SET @ToMonth   = LEFT(@PeriodTo, 2);
+    SET @ToYear    = RIGHT(@PeriodTo, 4);
+    
+    DECLARE @FromPeriod VARCHAR(2000), @ToPeriod VARCHAR(2000);
+    SET @FromPeriod = LTRIM(RTRIM(STR(@FromMonth + @FromYear * 100)));
+    SET @ToPeriod   = LTRIM(RTRIM(STR(@ToMonth + @ToYear * 100)));
+
+    -- Tạo bảng tạm #StructTable để sinh các cột cần thiết
+    CREATE TABLE #StructTable
+    (
+        Level           TINYINT,
+        ParentNodeID    VARCHAR(50),
+        CaptionID       VARCHAR(50),
+        CaptionName     NVARCHAR(500),
+        FieldName       VARCHAR(50),
+        ColMergeNum     TINYINT,
+        RowMergeNum     TINYINT,
+        ColID           TINYINT,
+        IsLocked        TINYINT,
+        DataFormat      VARCHAR(50),
+        Length          INT,
+        DataType        VARCHAR(50),
+        ControlType     VARCHAR(50),
+        DisplayOrder    INT IDENTITY(1, 1),
+        Expression      VARCHAR(1000),
+        DefaultValues   VARCHAR(1000),
+        SumFooter       VARCHAR(50),
+        IsHide          TINYINT DEFAULT(0),
+        DatatypeServer  VARCHAR(50),
+        Fix             NVARCHAR(50)
+    );
+
+    -- Đưa cấu trúc cột vào bảng tạm
+    INSERT INTO #StructTable
+    (Level, ParentNodeID, CaptionID, CaptionName, FieldName, ColMergeNum, RowMergeNum, ColID, DataType, Length, IsLocked, SumFooter, DatatypeServer, DataFormat, IsHide, Fix)
+    VALUES
+    (0, '', 'STT', 'Số thứ tự', 'STT', 1, 2, NULL, 'S', 100, NULL, '', 'NVARCHAR(50)', NULL, 0, ''),
+    (0, '', 'VoucherNo', 'Số phiếu', 'VoucherNo', 1, 2, NULL, 'S', 150, NULL, '', 'NVARCHAR(50)', NULL, 0, ''),
+    (0, '', 'VoucherDate', 'Ngày nhận', 'VoucherDate', 1, 2, NULL, 'S', 100, NULL, '', 'NVARCHAR(50)', NULL, 0, ''),
+    (0, '', 'DeliveryDate', 'Ngày giao', 'DeliveryDate', 1, 2, NULL, 'S', 100, NULL, '', 'NVARCHAR(50)', NULL, 0, ''),
+    (0, '', 'ObjectID', 'Mã khách hàng', 'ObjectID', 1, 2, NULL, 'S', 150, NULL, '', 'NVARCHAR(50)', NULL, 0, ''),
+    (0, '', 'ObjectName', 'Tên khách hàng', 'ObjectName', 1, 2, NULL, 'S', 250, NULL, '', 'NVARCHAR(500)', NULL, 0, ''),
+    (0, '', 'InventoryName', 'Tên hàng hóa', 'InventoryName', 1, 2, NULL, 'S', 250, NULL, '', 'NVARCHAR(500)', NULL, 0, ''),
+    (0, '', 'Quantity', 'Số lượng', 'Quantity', 1, 2, NULL, 'S', 100, NULL, '', 'DECIMAL(28,8)', NULL, 0, '')
+
+    -- Truy vấn dữ liệu theo tiêu chí lọc
+    SELECT 
+        ROW_NUMBER() OVER (ORDER BY T1.VoucherDate DESC, T1.VoucherNum) AS STT,
+        T1.VoucherNum,
+        CONVERT(VARCHAR(10), T1.VoucherDate, 103) AS VoucherDate,
+        CONVERT(VARCHAR(10), T2.DeliveryDate, 103) AS DeliveryDate,
+        T1.CustomerID AS ObjectID,
+        T1.CustomerName AS ObjectName,
+        T2.InventoryName,
+        T2.Quantity
+    FROM D05T0016 T1
+    INNER JOIN D05T0017 T2 ON T1.QuotationID = T2.QuotationID
+    WHERE 1 = 1
+        AND (T1.TranMonth + T1.TranYear * 100) BETWEEN @FromPeriod AND @ToPeriod
+        AND CONVERT(NVARCHAR(500), T1.VoucherDate, 111) BETWEEN CONVERT(NVARCHAR(500), @DateRDVoucherDateFrom, 103)
+                                                          AND CONVERT(NVARCHAR(500), @DateRDVoucherDateTo, 103)
+        AND (ISNULL(@VoucherNo, '') = '' OR T1.VoucherNum LIKE '%' + REPLACE(@VoucherNo, '''', '''''') + '%')
+        AND (ISNULL(@DeliveryDateFrom, '') = '' OR T2.DeliveryDate >= @DeliveryDateFrom)
+        AND (ISNULL(@DeliveryDateTo, '') = '' OR T2.DeliveryDate <= @DeliveryDateTo)
+        AND (ISNULL(@StatusSO, '') = '' OR T1.StatusVoucher = @StatusSO)
+
+    -- Xóa bảng tạm sau khi sử dụng
+    DROP TABLE #StructTable;
+
+END
+
+
+---------------
+
+
+
 --IF EXISTS (SELECT TOP 1 1 FROM DBO.SYSOBJECTS WITH(NOLOCK) WHERE ID = OBJECT_ID(N'[DBO].[Z_Q00713_D05P0707]') AND OBJECTPROPERTY(ID, N'IsProcedure') = 1)
 --DROP PROCEDURE [DBO].[Z_Q00713_D05P0707]
 --GO
